@@ -33,8 +33,8 @@ export function MapComponent() {
 	const [waypoints, setWaypoints] = useState<google.maps.LatLngLiteral[]>([]);
 
 	const getMarkers = useCallback(async () => {
+		const orderId = Number(idOrdem);
 		try {
-			const orderId = Number(idOrdem);
 			if (!idOrdem || Number.isNaN(orderId) || !hashEmpresa) {
 				throw new Error(
 					"Um dos parâmetros está incorreto, verifique-os e tente novamente",
@@ -80,10 +80,25 @@ export function MapComponent() {
 	);
 
 	useEffect(() => {
+		const paramsListener = () => {
+			const orderId = Number(idOrdem);
+			if (!idOrdem || Number.isNaN(orderId) || !hashEmpresa) {
+				toast.error(
+					"Um dos parâmetros está incorreto, verifique-os e tente novamente",
+				);
+			}
+		};
+		window.addEventListener("load", paramsListener);
+
 		getMarkers();
-	}, [getMarkers]);
+
+		return () => {
+			window.removeEventListener("load", paramsListener);
+		};
+	}, [getMarkers, hashEmpresa, idOrdem]);
 
 	useEffect(() => {
+		
 		if (locations) {
 			getInitialPaths();
 		}
@@ -138,8 +153,6 @@ export function MapComponent() {
 						destination: locations.destination,
 						alreadyExistingPaths: paths,
 					});
-
-					console.log(route);
 
 					setPaths(route);
 					setMarkers(newOrder);
