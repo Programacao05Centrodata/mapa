@@ -9,8 +9,8 @@ import {
 
 import { GoogleMapsContext, useMapsLibrary } from "@vis.gl/react-google-maps";
 
-import type { Ref } from "react";
 import type { IHandleMovedVertexPositionProps } from "@/components/map";
+import type { Ref } from "react";
 
 type PolylineEventProps = {
 	onClick?: (e: google.maps.MapMouseEvent) => void;
@@ -48,7 +48,6 @@ function usePolyline(props: PolylineProps) {
 		...restOptions
 	} = props;
 	const polylineOptions = restOptions;
-	// polyline is here to avoid triggering the useEffect below when the callbacks change (which happen if the user didn't memoize them)
 	const callbacks = useRef<Record<string, (e: unknown) => void>>({});
 	Object.assign(callbacks.current, {
 		onClick,
@@ -62,23 +61,18 @@ function usePolyline(props: PolylineProps) {
 	const geometryLibrary = useMapsLibrary("geometry");
 
 	const polyline = useRef(new google.maps.Polyline()).current;
-	// update PolylineOptions (note the dependencies aren't properly checked
-	// here, we just assume that setOptions is smart enough to not waste a
-	// lot of time updating values that didn't change)
 	useMemo(() => {
 		polyline.setOptions(polylineOptions);
 	}, [polyline, polylineOptions]);
 
 	const map = useContext(GoogleMapsContext)?.map;
 
-	// update the path with the encodedPath
 	useMemo(() => {
 		if (!encodedPath || !geometryLibrary) return;
 		const path = geometryLibrary.encoding.decodePath(encodedPath);
 		polyline.setPath(path);
 	}, [polyline, encodedPath, geometryLibrary]);
 
-	// create polyline instance and add to the map once the map is available
 	useEffect(() => {
 		if (!map) {
 			if (map === undefined)
@@ -94,11 +88,9 @@ function usePolyline(props: PolylineProps) {
 		};
 	}, [map, polyline]);
 
-	// attach and re-attach event-handlers when any of the properties change
 	useEffect(() => {
 		if (!polyline) return;
 
-		// Add event listeners
 		const gme = google.maps.event;
 		for (const [eventName, eventCallback] of [
 			["click", "onClick"],
@@ -125,20 +117,19 @@ function usePolyline(props: PolylineProps) {
 		const gme = google.maps.event;
 		const path = polyline.getPath();
 
-		// Add listener to the path's "set_at" event
 		const listener = gme.addListener(path, "set_at", (index: number) => {
 			const movedVertex = path.getAt(index);
-			onMovedVertexPosition({ coordinates: movedVertex.toJSON() }); // No need to call setAt
+			onMovedVertexPosition({ coordinates: movedVertex.toJSON() });
 		});
 
 		const addHighlight = gme.addListener(polyline, "mouseover", () => {
 			polyline.setOptions({
-				strokeWeight: 4,
+				strokeWeight: 5,
 				strokeColor: polylineOptions.strokeColor,
 				zIndex: 100,
 			});
 		});
-		
+
 		const removeHighlight = gme.addListener(polyline, "mouseout", () => {
 			polyline.setOptions({
 				strokeWeight: polylineOptions.strokeWeight,
@@ -147,13 +138,12 @@ function usePolyline(props: PolylineProps) {
 			});
 		});
 
-		// Cleanup: Remove the specific listener from the path
 		return () => {
 			gme.removeListener(listener);
 			gme.removeListener(addHighlight);
 			gme.removeListener(removeHighlight);
 		};
-	}, [polyline, onMovedVertexPosition, polylineOptions]); // Ensure dependencies are stable
+	}, [polyline, onMovedVertexPosition, polylineOptions]);
 
 	return polyline;
 }

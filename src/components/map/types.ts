@@ -6,38 +6,232 @@ export interface ComputeRoutesResponse {
 export interface BasePoint {
 	id: number;
 	name: string;
-	address: string;
-	location: {
-		lat: number
-		lng: number
+	address: {
+		route: string;
+		number: string | null;
+		neighborhood: string | null;
+		city: string;
+		state: string;
 	};
+	location: {
+		lat: number;
+		lng: number;
+	};
+	route?: {
+		waypoints: google.maps.LatLngLiteral[];
+		directionsResponse: google.maps.DirectionsResult;
+	};
+}
+
+// Novos tipos para BasePoint com e sem o atributo "route"
+export type BasePointWithRoute = BasePoint & {
+	route: {
+		waypoints: google.maps.LatLngLiteral[];
+		directionsResponse: google.maps.DirectionsResult;
+	};
+};
+
+export type BasePointWithoutRoute = BasePoint & {
+	route?: undefined;
+};
+
+// Funções type guard
+export function isBasePointWithRoute(
+	point: BasePoint,
+): point is BasePointWithRoute {
+	return point.route !== undefined;
+}
+
+export function isBasePointWithoutRoute(
+	point: BasePoint,
+): point is BasePointWithoutRoute {
+	return point.route === undefined;
 }
 
 export interface PickUpPoint extends BasePoint {
 	type: "coleta";
 	dropsOffIn: number[];
+	isOrigin: boolean;
+	goesTo?: number;
+	comesFrom?: number;
 }
 
 export interface DropOffPoint extends BasePoint {
 	type: "entrega";
 	pickedUpIn: number[];
-}
-
-export function isPickUpPoint(point: Point): point is PickUpPoint {
-  return point.type === "coleta" && Array.isArray(point.dropsOffIn);
-}
-
-export function isDropOffPoint(point: Point): point is DropOffPoint {
-  return point.type === "entrega" && Array.isArray(point.pickedUpIn);
+	isFinalDestination: boolean;
+	goesTo?: number;
+	comesFrom?: number;
 }
 
 export type Point = PickUpPoint | DropOffPoint;
+
+// Novo tipo para Point com rota
+export type PointWithRoute = Point & BasePointWithRoute;
+
+// Type guard para verificar se um Point tem rota
+export function isPointWithRoute(point: Point): point is PointWithRoute {
+	return isBasePointWithRoute(point);
+}
+
+// Basic type guards
+export function isPickUpPoint(point: Point): point is PickUpPoint {
+	return point.type === "coleta" && Array.isArray(point.dropsOffIn);
+}
+
+export function isDropOffPoint(point: Point): point is DropOffPoint {
+	return point.type === "entrega" && Array.isArray(point.pickedUpIn);
+}
+
+// Origin type guard
+export function isOriginPoint(
+	point: Point,
+): point is PickUpPoint & { isOrigin: true } {
+	return isPickUpPoint(point) && point.isOrigin === true;
+}
+
+// Final destination type guard
+export function isFinalDestinationPoint(
+	point: Point,
+): point is DropOffPoint & { isFinalDestination: true } {
+	return isDropOffPoint(point) && point.isFinalDestination === true;
+}
+
+// Additional utility type guards
+export function hasNextPoint(
+	point: Point,
+): point is Point & { goesTo: number } {
+	return point.goesTo !== undefined;
+}
+
+export function hasPreviousPoint(
+	point: Point,
+): point is Point & { comesFrom: number } {
+	return point.comesFrom !== undefined;
+}
+
+// Complex interfaces for more specific use cases
+export interface RouteOrigin extends PickUpPoint {
+	isOrigin: true;
+	comesFrom?: undefined; // Origin points shouldn't have a previous point
+	goesTo: number; // Origin should always have a next point
+}
+
+export interface RouteFinalDestination extends DropOffPoint {
+	isFinalDestination: true;
+	goesTo?: undefined; // Final destination shouldn't have a next point
+	comesFrom: number; // Final destination should always have a previous point
+}
+
+// Type guards for complex interfaces
+export function isRouteOrigin(point: Point): point is RouteOrigin {
+	return (
+		isPickUpPoint(point) &&
+		point.isOrigin === true &&
+		point.comesFrom === undefined &&
+		point.goesTo !== undefined
+	);
+}
+
+export function isRouteFinalDestination(
+	point: Point,
+): point is RouteFinalDestination {
+	return (
+		isDropOffPoint(point) &&
+		point.isFinalDestination === true &&
+		point.goesTo === undefined &&
+		point.comesFrom !== undefined
+	);
+}
+
+// Intermediate point types if needed
+export interface IntermediatePickUpPoint extends PickUpPoint {
+	isOrigin: false;
+	comesFrom: number;
+	goesTo: number;
+}
+
+export interface IntermediateDropOffPoint extends DropOffPoint {
+	isFinalDestination: false;
+	comesFrom: number;
+	goesTo: number;
+}
+
+// Type guards for intermediate points
+export function isIntermediatePickUpPoint(
+	point: Point,
+): point is IntermediatePickUpPoint {
+	return (
+		isPickUpPoint(point) &&
+		point.isOrigin === false &&
+		point.comesFrom !== undefined &&
+		point.goesTo !== undefined
+	);
+}
+
+export function isIntermediateDropOffPoint(
+	point: Point,
+): point is IntermediateDropOffPoint {
+	return (
+		isDropOffPoint(point) &&
+		point.isFinalDestination === false &&
+		point.comesFrom !== undefined &&
+		point.goesTo !== undefined
+	);
+}
+
+// Funções type guard compostas
+export function isPickUpPointWithRoute(
+	point: Point,
+): point is PickUpPoint & BasePointWithRoute {
+	return isPickUpPoint(point) && isBasePointWithRoute(point);
+}
+
+export function isDropOffPointWithRoute(
+	point: Point,
+): point is DropOffPoint & BasePointWithRoute {
+	return isDropOffPoint(point) && isBasePointWithRoute(point);
+}
+
+export function isFinalDestinationWithRoute(
+	point: Point,
+): point is RouteFinalDestination & BasePointWithRoute {
+	return isRouteFinalDestination(point) && isBasePointWithRoute(point);
+}
 
 export interface PointsData {
 	orderId: number;
 	origin: PickUpPoint;
 	destination: DropOffPoint | null;
-	orderedPoints: Point[]
+	orderedPoints: Point[];
+}
+
+export interface IPath {
+	from: Point;
+	point: Point;
+	route: {
+		waypoints: google.maps.LatLngLiteral[];
+		directionsResponse: google.maps.DirectionsResult;
+	};
+}
+
+export interface ErrorResponse {
+	statusCode: number;
+	message: string;
+}
+
+export interface IPath {
+	from: Point;
+	point: Point;
+	route: {
+		waypoints: google.maps.LatLngLiteral[];
+		directionsResponse: google.maps.DirectionsResult;
+	};
+}
+
+export interface ErrorResponse {
+	statusCode: number;
+	message: string;
 }
 
 interface Route {
@@ -51,17 +245,17 @@ interface Route {
 	warnings?: string[];
 	viewport: Viewport;
 	travelAdvisory?: RouteTravelAdvisory;
-  localizedValues?: LocalizedValues;
+	localizedValues?: LocalizedValues;
 }
 
 interface LocalizedValue {
-  text: string
+	text: string;
 }
 
 export interface LocalizedValues {
-  distance: LocalizedValue;
-  duration: LocalizedValue;
-  staticDuration: LocalizedValue;
+	distance: LocalizedValue;
+	duration: LocalizedValue;
+	staticDuration: LocalizedValue;
 }
 
 interface RouteLeg {
@@ -181,23 +375,23 @@ export interface Viewport {
 export type RawPoi = {
 	name: string;
 	location: google.maps.LatLngLiteral;
-}
+};
 
 export type Poi = {
 	id: string;
-} & RawPoi
+} & RawPoi;
 
 export interface IRoutePoints {
 	origin: RawPoi;
 	destinations: RawPoi[];
 }
 
-export interface IPath {
+export interface IPathForPolyline {
 	name: string;
 	link: {
-		from: number
-		to: number
-	}
+		from: number;
+		to: number;
+	};
 	distanceMeters: number;
 	duration: string;
 	staticDuration: string;

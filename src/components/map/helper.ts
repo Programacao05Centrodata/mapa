@@ -1,12 +1,6 @@
-import type {
-	IPath,
-	Poi,
-	Point,
-	PointsData,
-	RawPoi,
-} from "@/components/map/types";
+import type { Point, PointWithRoute, PointsData } from "@/components/map/types";
 import type { ComputeRoutesResponse } from "@/components/map/types";
-import { v4 as uuidV4 } from "uuid";
+import { api } from "@/services/api";
 import axios from "axios";
 
 type GetPolylineInputs = {
@@ -60,7 +54,6 @@ export async function getRoute({
 				},
 			},
 			polylineQuality: "OVERVIEW",
-			optimizeWaypointOrder: true,
 			travelMode: "DRIVE",
 			routingPreference: "TRAFFIC_AWARE",
 			routeModifiers: {
@@ -72,9 +65,10 @@ export async function getRoute({
 			units: "METRIC",
 		},
 		{
-			headers: {
-				"X-Goog-Api-Key": import.meta.env.VITE_APP_GOOGLE_MAPS_API_KEY,
-				"X-Goog-FieldMask": "*",
+			params: {
+				key: import.meta.env.VITE_APP_GOOGLE_MAPS_API_KEY,
+				fields:
+					"routes.legs,routes.distanceMeters,routes.duration,routes.staticDuration",
 			},
 		},
 	);
@@ -100,92 +94,101 @@ export async function getDecodedPolyline(input: IPolylineInput) {
 	return encoding.decodePath(encodedPolyline);
 }
 
-interface IGetPolylineProps {
+interface IGetPathProps {
 	origin: Point;
-	waypoints: Point[];
-	destination: Point | null;
-	alreadyExistingPaths: IPath[];
+	destination: Point;
+	waypoints: google.maps.LatLngLiteral[];
+	directionsService: google.maps.DirectionsService;
 }
 
-export async function getPolyline({
+export async function getPath({
 	origin,
-	waypoints,
 	destination,
-	alreadyExistingPaths,
-}: IGetPolylineProps): Promise<{ route: IPath[] }> {
-	const orderedPoints = [...waypoints].filter(
+	directionsService,
+	waypoints,
+}: IGetPathProps): Promise<PointWithRoute> {
+	const directionsResult = await directionsService.route({
+		origin: origin.location,
+		waypoints: waypoints.map((waypoint) => {
+			return {
+				stopover: false,
+				location: waypoint,
+			};
+		}),
+		destination: destination.location,
+		travelMode: google.maps.TravelMode.DRIVING,
+	});
+
+	destination.goesTo = undefined;
+
+	return {
+		...destination,
+		goesTo: undefined,
+		comesFrom: origin.id,
+		route: {
+			directionsResponse: directionsResult,
+			waypoints,
+		},
+	};
+}
+
+interface IGetPathsProps {
+	points: Point[];
+	alreadyExistingPathsForPoints: PointWithRoute[];
+	directionsService: google.maps.DirectionsService;
+}
+
+export async function getPaths({
+	points,
+	alreadyExistingPathsForPoints,
+	directionsService,
+}: IGetPathsProps): Promise<{
+	origin: Point;
+	destinationsWithRoutes: PointWithRoute[];
+}> {
+	if (points.length === 0) {
+		throw new Error("Points array cannot be empty");
+	}
+
+	const [origin, ...destinations] = points.filter(
 		(point): point is Point => !!point,
 	);
-	const route: IPath[] = [];
-	let currentPoint = origin;
 
-	for (const nextPoint of orderedPoints) {
-		const alreadyExistingPath =
-			alreadyExistingPaths.find(
-				(path) =>
-					path.link.from === currentPoint.id && path.link.to === nextPoint.id,
-			) || null;
+	const destinationsWithRoutes: PointWithRoute[] = [];
+	let previousPoint = origin;
 
-		// console.log(
-		// 	`Caminho de ${currentPoint.id} - ${currentPoint.name} até ${nextPoint.id} - ${nextPoint.name} ${alreadyExistingPath ? "já existe" : "não existe. Buscando rota"}`,
-		// );
+	for (const destination of destinations) {
+		const existingRoute = alreadyExistingPathsForPoints.find(
+			(point) => point.id === destination.id,
+		);
 
-		if (alreadyExistingPath) {
-			route.push(alreadyExistingPath);
+		if (existingRoute) {
+			destinationsWithRoutes.push(existingRoute);
 		} else {
-			const { routes } = await getRoute({
-				startPoint: currentPoint.location,
-				finishPoint: nextPoint.location,
+			const pointWithRoute = await getPath({
+				origin: previousPoint,
+				destination,
+				directionsService,
+				waypoints: [],
 			});
-			const pathRoute = routes[0];
 
-			route.push({
-				name: `De ${currentPoint.name} para ${nextPoint.name}`,
-				polyline: await getDecodedPolyline({
-					type: "encoded",
-					encodedPolyline: pathRoute.polyline.encodedPolyline,
-				}),
-				link: {
-					from: currentPoint.id,
-					to: nextPoint.id,
-				},
-				distanceMeters: pathRoute.distanceMeters,
-				duration: pathRoute.duration,
-				staticDuration: pathRoute.staticDuration,
-				localizedValues: pathRoute.localizedValues,
-				viewport: pathRoute.viewport,
-			});
+			if (previousPoint.id === origin.id) {
+				origin.goesTo = destination.id;
+			} else {
+				destinationsWithRoutes[destinationsWithRoutes.length - 1].goesTo =
+					pointWithRoute.id;
+			}
+
+			destinationsWithRoutes.push(pointWithRoute);
 		}
-		currentPoint = nextPoint;
+
+		previousPoint = destination;
 	}
 
-	// Append route to destination if provided and last point is different
-	if (destination && currentPoint.id !== destination.id) {
-		const { routes } = await getRoute({
-			startPoint: currentPoint.location,
-			finishPoint: destination.location,
-		});
-		const pathRoute = routes[0];
-
-		route.push({
-			name: `De ${currentPoint.name} para ${destination.name}`,
-			polyline: await getDecodedPolyline({
-				type: "encoded",
-				encodedPolyline: pathRoute.polyline.encodedPolyline,
-			}),
-			link: {
-				from: currentPoint.id,
-				to: destination.id,
-			},
-			distanceMeters: pathRoute.distanceMeters,
-			duration: pathRoute.duration,
-			staticDuration: pathRoute.staticDuration,
-			localizedValues: pathRoute.localizedValues,
-			viewport: pathRoute.viewport,
-		});
-	}
-
-	return { route };
+	return {
+		origin,
+		destinationsWithRoutes,
+	};
 }
 
 interface IGetBestPointsOrder {
@@ -196,43 +199,10 @@ interface IGetBestPointsOrder {
 export async function getBestPointsOrder({
 	hashEmpresa,
 	orderId,
-}: IGetBestPointsOrder) {
-	const response = await axios.get<PointsData>(
-		`http://localhost:3333/v2/rota-de-entrega/${hashEmpresa}/melhor-rota`,
+}: IGetBestPointsOrder): Promise<PointsData> {
+	const response = await api.get<PointsData>(
+		`/rota-de-entrega/${hashEmpresa}/melhor-rota`,
 		{ params: { idOrdem: orderId } },
 	);
 	return response.data;
-}
-
-interface IGetNewRouteProps {
-	origin: Poi;
-	oldOrder: Poi[];
-	newOrder: Poi[];
-}
-
-export function refinePois<T extends RawPoi | RawPoi[]>(
-	rawPois: T,
-): T extends RawPoi[] ? Poi[] : Poi {
-	const parsePoi = (rawPoi: RawPoi): Poi => ({
-		...rawPoi,
-		id: uuidV4(),
-	});
-
-	if (Array.isArray(rawPois)) {
-		return rawPois.map(parsePoi) as T extends RawPoi[] ? Poi[] : Poi;
-	}
-
-	return parsePoi(rawPois) as T extends RawPoi[] ? Poi[] : Poi;
-}
-
-export async function getNewRoute({
-	origin,
-	oldOrder,
-	newOrder,
-}: IGetNewRouteProps) {
-	console.log(newOrder, oldOrder);
-
-	return {
-		markers: [origin],
-	};
 }

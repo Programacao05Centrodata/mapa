@@ -1,7 +1,7 @@
 import {
+	type Point,
 	isDropOffPoint,
 	isPickUpPoint,
-	type Point,
 } from "@/components/map/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,10 +20,9 @@ interface IPoiMarkersProps {
 interface IMarkerProps {
 	point: Point;
 	index: number;
-	showOrder?: boolean;
 }
 
-const Marker = ({ point, showOrder, index }: IMarkerProps) => {
+const Marker = ({ point, index }: IMarkerProps) => {
 	const [markerRef, marker] = useAdvancedMarkerRef();
 
 	const [infoWindowShown, setInfoWindowShown] = useState(false);
@@ -46,7 +45,7 @@ const Marker = ({ point, showOrder, index }: IMarkerProps) => {
 				background={"#FBBC04"}
 				glyphColor={"#000"}
 				borderColor={"#000"}
-				glyph={showOrder ? `${index + 1}` : undefined}
+				glyph={`${index + 1}`}
 			/>
 			{infoWindowShown && (
 				<InfoWindow
@@ -70,7 +69,9 @@ const Marker = ({ point, showOrder, index }: IMarkerProps) => {
 						</Button>
 					</div>
 					<div className="gap-1 flex flex-col">
-						<p>{point.address}</p>
+						<p>
+							{point.address.route}, {point.address.number}
+						</p>
 						{isPickUpPoint(point) && (
 							<div>
 								<p>Ponto de coleta, entrega em:</p>
@@ -90,11 +91,11 @@ const Marker = ({ point, showOrder, index }: IMarkerProps) => {
 	);
 };
 
-export const PoiMarkers = ({ points, showOrder = false }: IPoiMarkersProps) => {
+export const PoiMarkers = ({ points }: IPoiMarkersProps) => {
 	return (
 		<>
 			{points.map((poi: Point, index) => (
-				<Marker point={poi} index={index} showOrder={showOrder} key={poi.id} />
+				<Marker point={poi} index={index} key={poi.id} />
 			))}
 		</>
 	);
