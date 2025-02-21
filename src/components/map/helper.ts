@@ -1,5 +1,5 @@
 import type {
-	IPath,
+	IPathForPolyline,
 	Poi,
 	Point,
 	PointsData,
@@ -104,7 +104,63 @@ interface IGetPolylineProps {
 	origin: Point;
 	waypoints: Point[];
 	destination: Point | null;
-	alreadyExistingPaths: IPath[];
+	alreadyExistingPaths: IPathForPolyline[];
+}
+
+export interface IPathForService {
+	from: Point;
+	to: Point;
+}
+
+interface IGetPathsProps {
+	origin: Point;
+	waypoints: Point[];
+	destination: Point | null;
+	alreadyExistingPaths: IPathForService[];
+}
+
+export function getPaths({
+	origin,
+	waypoints,
+	destination,
+	alreadyExistingPaths,
+}: IGetPathsProps): IPathForService[] {
+	
+	const orderedPoints = [...waypoints].filter(
+		(point): point is Point => !!point,
+	);
+	const pathsForService: IPathForService[] = [];
+	let currentPoint = origin;
+
+	for (const nextPoint of orderedPoints) {
+		const alreadyExistingPath =
+			alreadyExistingPaths.find(
+				(path) =>
+					path.from.id === currentPoint.id && path.to.id === nextPoint.id,
+			) || null;
+
+		if (alreadyExistingPath) {
+			pathsForService.push({
+				from: currentPoint,
+				to: nextPoint,
+			});
+		} else {
+			pathsForService.push({
+				from: currentPoint,
+				to: nextPoint,
+			});
+		}
+		currentPoint = nextPoint;
+	}
+
+	if (destination && currentPoint.id !== destination.id) {
+		pathsForService.push({
+			from: currentPoint,
+			to: destination,
+		});
+	}
+
+	return pathsForService;
 }
 
 export async function getPolyline({
@@ -112,11 +168,15 @@ export async function getPolyline({
 	waypoints,
 	destination,
 	alreadyExistingPaths,
-}: IGetPolylineProps): Promise<{ route: IPath[] }> {
+}: IGetPolylineProps): Promise<{
+	route: IPathForPolyline[];
+	pathsForService: IPathForService[];
+}> {
 	const orderedPoints = [...waypoints].filter(
 		(point): point is Point => !!point,
 	);
-	const route: IPath[] = [];
+	const route: IPathForPolyline[] = [];
+	const pathsForService: IPathForService[] = [];
 	let currentPoint = origin;
 
 	for (const nextPoint of orderedPoints) {
@@ -126,11 +186,11 @@ export async function getPolyline({
 					path.link.from === currentPoint.id && path.link.to === nextPoint.id,
 			) || null;
 
-		// console.log(
-		// 	`Caminho de ${currentPoint.id} - ${currentPoint.name} até ${nextPoint.id} - ${nextPoint.name} ${alreadyExistingPath ? "já existe" : "não existe. Buscando rota"}`,
-		// );
-
 		if (alreadyExistingPath) {
+			pathsForService.push({
+				from: currentPoint,
+				to: nextPoint,
+			});
 			route.push(alreadyExistingPath);
 		} else {
 			const { routes } = await getRoute({
@@ -139,6 +199,10 @@ export async function getPolyline({
 			});
 			const pathRoute = routes[0];
 
+			pathsForService.push({
+				from: currentPoint,
+				to: nextPoint,
+			});
 			route.push({
 				name: `De ${currentPoint.name} para ${nextPoint.name}`,
 				polyline: await getDecodedPolyline({
@@ -167,6 +231,10 @@ export async function getPolyline({
 		});
 		const pathRoute = routes[0];
 
+		pathsForService.push({
+			from: currentPoint,
+			to: destination,
+		});
 		route.push({
 			name: `De ${currentPoint.name} para ${destination.name}`,
 			polyline: await getDecodedPolyline({
@@ -185,7 +253,7 @@ export async function getPolyline({
 		});
 	}
 
-	return { route };
+	return { route, pathsForService };
 }
 
 interface IGetBestPointsOrder {

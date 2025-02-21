@@ -4,11 +4,14 @@ import {
 	useMap,
 } from "@vis.gl/react-google-maps";
 import { useCallback, useEffect, useState } from "react";
-import { Polyline } from "./polygons/polyline";
 import { MapMenu } from "./menu";
-import { getBestPointsOrder, getPolyline } from "@/components/map/helper";
+import {
+	getBestPointsOrder,
+	getPaths,
+	type IPathForService,
+} from "@/components/map/helper";
 import { toast } from "sonner";
-import type { IPath, Point, PointsData } from "@/components/map/types";
+import type { Point, PointsData } from "@/components/map/types";
 import { isAxiosError } from "axios";
 import { PoiMarkers } from "@/components/map/markers";
 
@@ -26,15 +29,17 @@ export function MapComponent() {
 	const idOrdem = searchParams.get("idOrdem");
 	const hashEmpresa = searchParams.get("hashEmpresa");
 	const [locations, setLocations] = useState<PointsData | null>(null);
+	const [isLoadingLocations, setIsLoadingLocations] = useState(true);
 	const map = useMap();
-	const [loadingPaths, setLoadingPaths] = useState(false);
-	const [paths, setPaths] = useState<IPath[]>([]);
+	const [paths, setPaths] = useState<IPathForService[]>([]);
 	const [markers, setMarkers] = useState<Point[]>([]);
-	const [waypoints, setWaypoints] = useState<google.maps.LatLngLiteral[]>([]);
+	const [routePolylines, setRoutePolylines] =
+		useState<google.maps.DirectionsPolyline[]>();
 
 	const getMarkers = useCallback(async () => {
 		const orderId = Number(idOrdem);
 		try {
+			setIsLoadingLocations(true);
 			if (!idOrdem || Number.isNaN(orderId) || !hashEmpresa) {
 				throw new Error(
 					"Um dos parâmetros está incorreto, verifique-os e tente novamente",
@@ -50,34 +55,28 @@ export function MapComponent() {
 				return;
 			}
 			if (err instanceof Error) toast.error(err.message);
+		} finally {
+			setIsLoadingLocations(false);
 		}
 	}, [idOrdem, hashEmpresa]);
 
 	const getInitialPaths = useCallback(async () => {
 		if (locations) {
-			setLoadingPaths(true);
+
 			try {
-				const { route } = await getPolyline({
-					origin: locations.origin,
-					waypoints: locations.orderedPoints,
-					destination: locations.destination,
-					alreadyExistingPaths: [],
-				});
-				setPaths(route);
+				setPaths(
+					getPaths({
+						origin: locations.origin,
+						waypoints: locations.orderedPoints,
+						destination: locations.destination,
+						alreadyExistingPaths: [],
+					}),
+				);
 			} catch {
 				toast.error("Ocorreu um erro ao gerar sua rota");
-			} finally {
-				setLoadingPaths(false);
 			}
 		}
 	}, [locations]);
-
-	const handleMoveVertexPosition = useCallback(
-		async ({ coordinates }: IHandleMovedVertexPositionProps) => {
-			setWaypoints((prev) => [...prev, coordinates]);
-		},
-		[],
-	);
 
 	useEffect(() => {
 		const paramsListener = () => {
@@ -98,7 +97,6 @@ export function MapComponent() {
 	}, [getMarkers, hashEmpresa, idOrdem]);
 
 	useEffect(() => {
-		
 		if (locations) {
 			getInitialPaths();
 		}
@@ -124,37 +122,32 @@ export function MapComponent() {
 				);
 			}
 
-			for (const path of paths) {
+			if (locations.destination) {
 				bounds.extend(
-					new google.maps.LatLng(
-						path.viewport.high.latitude,
-						path.viewport.high.longitude,
-					),
-				);
-				bounds.extend(
-					new google.maps.LatLng(
-						path.viewport.low.latitude,
-						path.viewport.low.longitude,
+					new window.google.maps.LatLng(
+						locations.destination.location.lat,
+						locations.destination.location.lng,
 					),
 				);
 			}
 
 			map.fitBounds(bounds, { left: 380, bottom: 20, right: 20, top: 20 });
 		}
-	}, [map, locations, paths, markers]);
+	}, [map, locations, markers]);
 
 	const getReorderedRoute = useCallback(
 		async (newOrder: Point[]) => {
 			try {
 				if (locations?.orderedPoints.length === newOrder.length) {
-					const { route } = await getPolyline({
+					
+					const newPaths = getPaths({
 						origin: locations.origin,
 						waypoints: newOrder,
 						destination: locations.destination,
 						alreadyExistingPaths: paths,
 					});
-
-					setPaths(route);
+					
+					setPaths(newPaths);
 					setMarkers(newOrder);
 				}
 			} catch (error) {
@@ -164,23 +157,15 @@ export function MapComponent() {
 		[locations, paths],
 	);
 
-	const lineColors = [
-		"oklch(0.723 0.219 149.579)",
-		"oklch(0.715 0.143 215.221)",
-		"oklch(0.606 0.25 292.717)",
-		"oklch(0.623 0.214 259.815)",
-	];
-
 	return (
 		<div className="relative h-screen w-screen">
 			<MapMenu
-				isLoadingPaths={loadingPaths}
-				isLoadingMarkers={loadingPaths}
+				isLoadingMarkers={isLoadingLocations}
 				origin={locations?.origin || null}
 				destination={locations?.destination || null}
 				locations={markers}
 				paths={paths}
-				getBestRoute={async () => await getInitialPaths()}
+				getBestRoute={async () => await getMarkers()}
 				reorderCallback={getReorderedRoute}
 			/>
 			<GoogleMap
@@ -196,16 +181,6 @@ export function MapComponent() {
 				disableDefaultUI={true}
 				className="h-full w-full"
 			>
-				{paths.map(({ polyline, name, distanceMeters }, index) => (
-					<Polyline
-						key={`${name}-${distanceMeters}`}
-						path={polyline}
-						strokeColor={lineColors[index % lineColors.length]}
-						onMovedVertexPosition={(coordinates) =>
-							handleMoveVertexPosition(coordinates)
-						}
-					/>
-				))}
 				<PoiMarkers
 					showOrder={markers.length > 0}
 					points={[

@@ -5,7 +5,6 @@ import {
 	isDropOffPoint,
 	isPickUpPoint,
 	type DropOffPoint,
-	type IPath,
 	type PickUpPoint,
 	type Point,
 } from "../types";
@@ -19,13 +18,13 @@ import {
 import { MenuFooter } from "@/components/map/menu/footer";
 import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { PackageOpenIcon } from "lucide-react";
+import { ContainerIcon, TruckIcon } from "lucide-react";
+import type { IPathForService } from "@/components/map/helper";
 interface IMapMenuProps {
 	origin: PickUpPoint | null;
 	destination: DropOffPoint | null;
 	locations: Point[];
-	paths: IPath[];
-	isLoadingPaths: boolean;
+	paths: IPathForService[];
 	isLoadingMarkers: boolean;
 	getBestRoute: () => void | Promise<void>;
 	reorderCallback: (newOrder: Point[]) => Promise<void>;
@@ -36,60 +35,64 @@ export function MapMenu({
 	destination,
 	locations,
 	paths,
-	isLoadingPaths,
+	isLoadingMarkers,
 	getBestRoute,
 	reorderCallback,
 }: IMapMenuProps) {
 	const [locationsOrder, setLocationsOrder] = useState(locations);
 	const [draggingIndex, setDraggingIndex] = useState<null | number>(null);
-	const [orderIsDirty, setOrderIsDirty] = useState(false);
 
 	const handleReorder = useCallback(
 		(newOrder: Point[]) => {
-			if (draggingIndex === null || isLoadingPaths) return;
-
-			setOrderIsDirty(true);
+			if (draggingIndex === null || isLoadingMarkers) return;
 
 			const draggingElement = locationsOrder[draggingIndex];
-			
+
 			const newIndex = newOrder.findIndex(
 				(location) => location.id === draggingElement.id,
 			);
 
-			const isBeforePickUp = isDropOffPoint(draggingElement) ? draggingElement.pickedUpIn.every((pickUpId) => {
-				const hasPickUpOutOfOrder = newOrder
-					.slice(newIndex + 1)
-					.some((afterElement) => {
-						return (
-							isPickUpPoint(afterElement) &&
-							afterElement.id === pickUpId
-						);
-					});
-				return hasPickUpOutOfOrder;
-			}): false;
+			const isBeforePickUp = isDropOffPoint(draggingElement)
+				? draggingElement.pickedUpIn.every((pickUpId) => {
+						const hasPickUpOutOfOrder = newOrder
+							.slice(newIndex + 1)
+							.some((afterElement) => {
+								return (
+									isPickUpPoint(afterElement) && afterElement.id === pickUpId
+								);
+							});
+						return hasPickUpOutOfOrder;
+					})
+				: false;
 
-			const isAfterDropOff = isPickUpPoint(draggingElement) ? draggingElement.dropsOffIn.every((dropOffId) => {
-				const hasPickUpOutOfOrder = newOrder
-					.slice(0, newIndex)
-					.some((beforeElement) => {
-						return (
-							isDropOffPoint(beforeElement) &&
-							beforeElement.id === dropOffId
-						);
-					});
-				return hasPickUpOutOfOrder;
-			}): false;
+			const isAfterDropOff = isPickUpPoint(draggingElement)
+				? draggingElement.dropsOffIn.every((dropOffId) => {
+						const hasPickUpOutOfOrder = newOrder
+							.slice(0, newIndex)
+							.some((beforeElement) => {
+								return (
+									isDropOffPoint(beforeElement) &&
+									beforeElement.id === dropOffId
+								);
+							});
+						return hasPickUpOutOfOrder;
+					})
+				: false;
 
 			if (isBeforePickUp) {
-				toast.error("Esta entrega não pode ser ordenada para antes de sua coleta")
-				return
+				toast.error(
+					"Esta entrega não pode ser ordenada para antes de sua coleta",
+				);
+				return;
 			}
 
 			if (isAfterDropOff) {
-				toast.error("Esta coleta não pode ser ordenado para depois de sua entrega")
-				return
+				toast.error(
+					"Esta coleta não pode ser ordenado para depois de sua entrega",
+				);
+				return;
 			}
-			
+
 			locationsOrder.splice(draggingIndex, 1);
 			locationsOrder.splice(newIndex, 0, draggingElement);
 
@@ -97,7 +100,7 @@ export function MapMenu({
 
 			setDraggingIndex(newIndex);
 		},
-		[draggingIndex, locationsOrder, isLoadingPaths],
+		[draggingIndex, locationsOrder, isLoadingMarkers],
 	);
 
 	function handleDragStart(index: number) {
@@ -106,11 +109,11 @@ export function MapMenu({
 
 	const handleDragEnd = useCallback(async () => {
 		setDraggingIndex(null);
-	}, []);
+		reorderCallback(locationsOrder);
+	}, [locationsOrder, reorderCallback]);
 
 	useEffect(() => {
 		setLocationsOrder(locations);
-		setOrderIsDirty(false);
 	}, [locations]);
 
 	return (
@@ -134,12 +137,16 @@ export function MapMenu({
 						onReorder={handleReorder}
 						className="flex flex-col gap-2 max-w-sm"
 					>
-						<div className="flex gap-2 items-center font-bold">
-							<PackageOpenIcon className="size-4" />
-							{origin?.name}
-						</div>
+						{origin && (
+							<div className="flex gap-2 items-center font-bold text-nowrap whitespace-nowrap truncate text-ellipsis">
+								<TruckIcon className="size-4" />
+								<ContainerIcon className="size-6" />
+								1- {origin.name}
+							</div>
+						)}
 						{locationsOrder.map((location, index) => (
 							<MenuItem
+								index={index}
 								isDragActive={
 									draggingIndex === null ? null : draggingIndex === index
 								}
@@ -154,6 +161,7 @@ export function MapMenu({
 						))}
 						{destination && (
 							<MenuItem
+								index={locationsOrder.length}
 								isDragActive={null}
 								onDragStart={() => {}}
 								draggable={false}
@@ -166,13 +174,6 @@ export function MapMenu({
 				</ScrollArea>
 			</CardContent>
 			<MenuFooter
-				drawWithNewOrder={{
-					callback: async () => {
-						await reorderCallback(locationsOrder)
-						setOrderIsDirty(false)
-					},
-					disabled: !orderIsDirty,
-				}}
 				redefine={{
 					callback: async () => getBestRoute(),
 					disabled: false,
@@ -181,7 +182,7 @@ export function MapMenu({
 					callback: () => {
 						toast.success("Salvo");
 					},
-					disabled: orderIsDirty,
+					disabled: false,
 				}}
 			/>
 		</Card>

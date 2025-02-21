@@ -192,7 +192,7 @@ export interface IRoutePoints {
 	destinations: RawPoi[];
 }
 
-export interface IPath {
+export interface IPathForPolyline {
 	name: string;
 	link: {
 		from: number
